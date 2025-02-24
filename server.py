@@ -5,34 +5,59 @@ import json
 import os
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
+from flask_sqlalchemy import SQLAlchemy
 
 app = Flask(__name__)
 CORS(app)  # Autorise les requêtes cross-origin
-from flask_sqlalchemy import SQLAlchemy
 
-app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get("postgresql://data_suivi_user:oYFlVBF6UAaRZk3el2vtXhVPtvOn9uzW@dpg-cuue8c52ng1s739p7grg-a.oregon-postgres.render.com/data_suivi")
+# ---------------------------------------------------
+# 1. Configuration de la base de données PostgreSQL
+# ---------------------------------------------------
+app.config['SQLALCHEMY_DATABASE_URI'] = "postgresql://data_suivi_user:oYFlVBF6UAaRZk3el2vtXhVPtvOn9uzW@dpg-cuue8c52ng1s739p7grg-a.oregon-postgres.render.com/data_suivi"
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
+# ---------------------------------------------------
+# 2. Modèle pour stocker les données des capteurs
+# ---------------------------------------------------
 class SensorData(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     latitude = db.Column(db.Float, nullable=False)
     longitude = db.Column(db.Float, nullable=False)
     speed = db.Column(db.Float, nullable=False)
 
+# Création de la base de données si elle n'existe pas encore
+with app.app_context():
+    db.create_all()
+
+# ---------------------------------------------------
+# 3. Route pour recevoir et stocker les données en temps réel
+# ---------------------------------------------------
 @app.route("/api/push_data", methods=["POST"])
 def push_data():
-    data = request.json
-    new_data = SensorData(
-        latitude=data.get("latitude", 0),
-        longitude=data.get("longitude", 0),
-        speed=data.get("speed", 0)
-    )
+    if not request.json:
+        return jsonify({"error": "No JSON body"}), 400
+
+    body = request.json
+
+    try:
+        lat = float(body.get("latitude", 0))
+        lon = float(body.get("longitude", 0))
+        speed = float(body.get("speed", 0))
+    except ValueError:
+        return jsonify({"error": "Invalid numeric values"}), 400
+
+    # Sauvegarde en base de données
+    new_data = SensorData(latitude=lat, longitude=lon, speed=speed)
     db.session.add(new_data)
     db.session.commit()
+
+    print(f"📡 Nouveau point ajouté en BD: lat={lat}, lon={lon}, speed={speed}")
+
     return jsonify({"status": "Data saved"}), 200
 
 # ---------------------------------------------------
-# 1. Fonctions utilitaires : distance point-segment
+# 4. Fonctions utilitaires : distance point-segment
 # ---------------------------------------------------
 def latlon_to_xy(lat, lon, lat0, lon0):
     R = 111320.0  # Nombre de mètres par degré approximativement
@@ -68,47 +93,7 @@ def is_point_on_segment(latP, lonP, latA, lonA, latB, lonB, corridor_width=30):
     return dist <= corridor_width
 
 # ---------------------------------------------------
-# 2. Chargement des données initiales
-# ---------------------------------------------------
-CSV_FILE = "realtime_points.csv"
-all_points = []  # Liste de tuples (latitude, longitude, speed)
-
-def load_points_csv(csv_file):
-    data = []
-    try:
-        with open(csv_file, 'r', encoding='utf-8') as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                lat_str = row.get('Latitude')
-                lon_str = row.get('Longitude')
-                speed_str = row.get('Speed')
-                if lat_str and lon_str and speed_str:
-                    lat = float(lat_str)
-                    lon = float(lon_str)
-                    speed = float(speed_str)
-                    data.append((lat, lon, speed))
-        print(f"{len(data)} points chargés depuis {csv_file}")
-    except FileNotFoundError:
-        print(f"Fichier CSV introuvable: {csv_file}")
-    return data
-
-all_points = load_points_csv(CSV_FILE)
-
-# ---------------------------------------------------
-# 3. Fonction pour enregistrer un point dans un CSV en mode append
-# ---------------------------------------------------
-def append_point_to_csv(lat, lon, speed, filename="realtime_points.csv"):
-    file_exists = os.path.isfile(filename)
-    with open(filename, 'a', newline='') as csvfile:
-        writer = csv.writer(csvfile)
-        if not file_exists:
-            # Écrire l'en-tête si le fichier n'existe pas encore
-            writer.writerow(["latitude", "longitude", "speed"])
-        writer.writerow([lat, lon, speed])
-    print(f"Point enregistré dans {filename}: lat={lat}, lon={lon}, speed={speed}")
-
-# ---------------------------------------------------
-# 4. Routes existantes
+# 5. Routes pour les requêtes et analyses
 # ---------------------------------------------------
 @app.route("/")
 def index():
@@ -116,7 +101,9 @@ def index():
 
 @app.route("/get_all_points", methods=["GET"])
 def get_all_points():
-    return jsonify({"points": all_points})
+    points = SensorData.query.all()
+    data = [{"latitude": p.latitude, "longitude": p.longitude, "speed": p.speed} for p in points]
+    return jsonify({"points": data})
 
 @app.route("/compute", methods=["POST"])
 def compute():
@@ -132,13 +119,15 @@ def compute():
     speedSum = 0.0
     onCount = 0
 
-    for (lat, lon, speed) in all_points:
-        if is_point_on_segment(lat, lon, latA, lonA, latB, lonB, corridor):
-            onStreet.append([lat, lon])
-            speedSum += speed
+    points = SensorData.query.all()
+
+    for p in points:
+        if is_point_on_segment(p.latitude, p.longitude, latA, lonA, latB, lonB, corridor):
+            onStreet.append([p.latitude, p.longitude])
+            speedSum += p.speed
             onCount += 1
         else:
-            offStreet.append([lat, lon])
+            offStreet.append([p.latitude, p.longitude])
 
     avgSpeed = speedSum / onCount if onCount > 0 else 0.0
 
@@ -179,57 +168,19 @@ def compute_multiple():
 def compute_segment_points(latA, lonA, latB, lonB, corridor=30.0):
     onCount = 0
     offCount = 0
-    for (lat, lon, _) in all_points:
-        if is_point_on_segment(lat, lon, latA, lonA, latB, lonB, corridor):
+    points = SensorData.query.all()
+    
+    for p in points:
+        if is_point_on_segment(p.latitude, p.longitude, latA, lonA, latB, lonB, corridor):
             onCount += 1
         else:
             offCount += 1
+
     return onCount, offCount
 
 # ---------------------------------------------------
-# 5. Route pour recevoir les données en temps réel
+# 6. Lancement du serveur Flask sur Render
 # ---------------------------------------------------
-@app.route("/api/push_data", methods=["POST"])
-def push_data():
-    if not request.json:
-        return jsonify({"error": "No JSON body"}), 400
-    
-    body = request.json
-    
-    # Si les données sont envoyées sous la clé "data", alors décoder la chaîne JSON.
-    if "data" in body:
-        try:
-            parsed = json.loads(body["data"])
-        except Exception as e:
-            return jsonify({"error": "Invalid data JSON", "details": str(e)}), 400
-        lat = float(parsed.get("latitude", 0))
-        lon = float(parsed.get("longitude", 0))
-        speed = float(parsed.get("speed", 0))
-    else:
-        try:
-            lat = float(body.get("latitude", 0))
-            lon = float(body.get("longitude", 0))
-            speed = float(body.get("speed", 0))
-        except ValueError:
-            return jsonify({"error": "Invalid numeric values"}), 400
-    
-    all_points.append((lat, lon, speed))
-    print(f"📡 Nouveau point ajouté: lat={lat}, lon={lon}, speed={speed}")
-    # Enregistrer le point dans le CSV principal en mode append
-    append_point_to_csv(lat, lon, speed)
-    
-    return jsonify({
-        "status": "Point added",
-        "count": len(all_points)
-    }), 200
-
-# ---------------------------------------------------
-# 6. Lancement du serveur Flask
-# ---------------------------------------------------
-import os
-
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5001))  # Railway attribue un port dynamique
-    app.run(host="0.0.0.0", port=port, debug=True)
-
-    
+    port = int(os.environ.get("PORT", 5001))  # Render attribue un port dynamique
+    app.run(host="0.0.0.0", port=port, debug=False)
