@@ -13,7 +13,7 @@ CORS(app)  # Autorise les requêtes cross-origin
 # ---------------------------------------------------
 # 1. Configuration de la base de données PostgreSQL
 # ---------------------------------------------------
-app.config['SQLALCHEMY_DATABASE_URI'] = "DATABASE_URL"
+app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv("DATABASE_URL") 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
@@ -204,7 +204,7 @@ def compute_segment_points(latA, lonA, latB, lonB, corridor=30.0):
 
 import openai
 
-openai.api_key = "OPENAI_API_KEY"
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 def analyser_ralentissement(speed, avg_speed):
     prompt = f"La vitesse actuelle est {speed} m/s, alors que la moyenne est {avg_speed} m/s. Pourquoi pourrait-il y avoir un ralentissement à cet endroit ?"
