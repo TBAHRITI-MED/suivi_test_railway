@@ -54,6 +54,17 @@ def push_data():
     except ValueError:
         return jsonify({"error": "Invalid numeric values"}), 400
 
+    # **Calcul de la vitesse moyenne**
+    total_speed = db.session.query(db.func.sum(SensorData.speed)).scalar() or 0
+    total_count = db.session.query(SensorData).count() or 1  # éviter division par zéro
+    avg_speed = total_speed / total_count
+
+    # **Détection du ralentissement (plus de 20% de réduction de vitesse)**
+    ralentissement = False
+    if avg_speed > 0 and speed < avg_speed * 0.8:
+        ralentissement = True
+        print(f"⚠️ Ralentissement détecté ! Vitesse actuelle: {speed} m/s, Moyenne: {avg_speed:.2f} m/s")
+
     # Sauvegarde en base de données
     new_data = SensorData(latitude=lat, longitude=lon, speed=speed)
     db.session.add(new_data)
@@ -61,7 +72,13 @@ def push_data():
 
     print(f"📡 Nouveau point ajouté en BD: lat={lat}, lon={lon}, speed={speed}")
 
-    return jsonify({"status": "Data saved"}), 200
+    return jsonify({
+        "status": "Data saved",
+        "current_speed": speed,
+        "average_speed": avg_speed,
+        "slowdown_detected": ralentissement
+    }), 200
+
 
 # ---------------------------------------------------
 # 4. Fonctions utilitaires : distance point-segment
