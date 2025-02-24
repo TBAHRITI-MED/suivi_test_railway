@@ -13,7 +13,7 @@ CORS(app)  # Autorise les requêtes cross-origin
 # ---------------------------------------------------
 # 1. Configuration de la base de données PostgreSQL
 # ---------------------------------------------------
-app.config['SQLALCHEMY_DATABASE_URI'] = "postgresql://data_suivi_user:oYFlVBF6UAaRZk3el2vtXhVPtvOn9uzW@dpg-cuue8c52ng1s739p7grg-a.oregon-postgres.render.com/data_suivi"
+app.config['SQLALCHEMY_DATABASE_URI'] = "DATABASE_URL"
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
@@ -201,6 +201,23 @@ def compute_segment_points(latA, lonA, latB, lonB, corridor=30.0):
             offCount += 1
 
     return onCount, offCount
+
+import openai
+
+openai.api_key = "OPENAI_API_KEY"
+
+def analyser_ralentissement(speed, avg_speed):
+    prompt = f"La vitesse actuelle est {speed} m/s, alors que la moyenne est {avg_speed} m/s. Pourquoi pourrait-il y avoir un ralentissement à cet endroit ?"
+    response = openai.ChatCompletion.create(
+        model="gpt-4",
+        messages=[{"role": "user", "content": prompt}]
+    )
+    return response["choices"][0]["message"]["content"]
+
+# Test d'exécution
+explication = analyser_ralentissement(5, 10)
+print("🔍 Analyse de l'IA :", explication)
+
 
 # ---------------------------------------------------
 # 6. Lancement du serveur Flask sur Render
