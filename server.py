@@ -8,6 +8,28 @@ from flask_cors import CORS
 
 app = Flask(__name__)
 CORS(app)  # Autorise les requêtes cross-origin
+from flask_sqlalchemy import SQLAlchemy
+
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get("postgresql://data_suivi_user:oYFlVBF6UAaRZk3el2vtXhVPtvOn9uzW@dpg-cuue8c52ng1s739p7grg-a.oregon-postgres.render.com/data_suivi")
+db = SQLAlchemy(app)
+
+class SensorData(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    latitude = db.Column(db.Float, nullable=False)
+    longitude = db.Column(db.Float, nullable=False)
+    speed = db.Column(db.Float, nullable=False)
+
+@app.route("/api/push_data", methods=["POST"])
+def push_data():
+    data = request.json
+    new_data = SensorData(
+        latitude=data.get("latitude", 0),
+        longitude=data.get("longitude", 0),
+        speed=data.get("speed", 0)
+    )
+    db.session.add(new_data)
+    db.session.commit()
+    return jsonify({"status": "Data saved"}), 200
 
 # ---------------------------------------------------
 # 1. Fonctions utilitaires : distance point-segment
