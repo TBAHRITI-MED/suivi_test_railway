@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8" />
+    <title>Plusieurs segments (A→B, B→C, etc.) avec total A→Z et speed</title>
+    <style>
+        html,
+        body {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+        }
+        
+        #map {
+            width: 100%;
+            height: 100%;
+        }
+    </style>
+
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.3/dist/leaflet.css" />
+</head>
+
+<body>
+
+    <div id="map"></div>
+
+    <!-- Leaflet JS -->
+    <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.3/dist/leaflet.js"></script>
+    <script>
+        let map = L.map('map').setView([49.2484420, 4.0415017], 14);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap'
+        }).addTo(map);
+
+        // --- Variables globales ---
+        let clickedPoints = []; // mémorise tous les points cliqués
+        let markersAll = []; // marqueurs gris initiaux
+        let markersGreen = []; // marqueurs verts
+        let markersRed = []; // marqueurs rouges
+        let polylines = []; // lignes tracées
+
+        // 1) Charger tous les points initiaux en GRIS
+        fetch("/get_all_points")
+            .then(res => res.json())
+            .then(data => {
+                let points = data.points;
+                console.log("Points chargés:", points.length);
+                points.forEach(pt => {
+                    let [lat, lon] = pt;
+                    let m = L.circleMarker([lat, lon], {
+                        radius: 4,
+                        color: 'gray',
+                        fillColor: 'gray',
+                        fillOpacity: 1
+                    }).addTo(map);
+                    markersAll.push(m);
+                });
+            })
+            .catch(err => console.error(err));
+
+        function onMapClick(e) {
+            // On ajoute ce point dans clickedPoints
+            clickedPoints.push([e.latlng.lat, e.latlng.lng]);
+
+            // Calcule la lettre associée (A,B,C,...) 
+            let labelIndex = clickedPoints.length - 1; // 0 pour premier clic
+            let labelChar = String.fromCharCode(65 + labelIndex); // 'A' + labelIndex
+
+            // Placer un marker avec ce label
+            let marker = L.marker([e.latlng.lat, e.latlng.lng]).addTo(map);
+            marker.bindPopup(labelChar).openPopup();
+
+            // Si on a un nombre pair de points, on peut former un segment
+            if (clickedPoints.length % 2 === 0) {
+                let n = clickedPoints.length;
+                let A = clickedPoints[n - 2]; // avant-dernier
+                let B = clickedPoints[n - 1]; // dernier
+
+                // 1) Dessiner la ligne (A->B) en bleu
+                let poly = L.polyline([A, B], {
+                    color: 'blue'
+                }).addTo(map);
+                polylines.push(poly);
+
+                // 2) Premier fetch => /compute pour CE segment
+                fetch("/compute", {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json"
+                        },
+                        body: JSON.stringify({
+                            latA: A[0],
+                            lonA: A[1],
+                            latB: B[0],
+                            lonB: B[1]
+                        })
+                    })
+                    .then(res => res.json())
+                    .then(data => {
+                        let onStreet = data.onStreet;
+                        let offStreet = data.offStreet;
+                        let avgSpeed = data.avgSpeed; // <-- vitesse moyenne sur CE segment
+                        console.log("onStreet:", onStreet.length, "offStreet:", offStreet.length, "avgSpeed:", avgSpeed);
+
+                        // Supprime TOUTES les couches existantes (gris, vert, rouge)
+                        markersAll.forEach(m => map.removeLayer(m));
+                        markersGreen.forEach(m => map.removeLayer(m));
+                        markersRed.forEach(m => map.removeLayer(m));
+                        markersAll = [];
+                        markersGreen = [];
+                        markersRed = [];
+
+                        // Points verts
+                        onStreet.forEach(pt => {
+                            let [lat, lon] = pt;
+                            let m = L.circleMarker([lat, lon], {
+                                radius: 4,
+                                color: 'green',
+                                fillColor: 'green',
+                                fillOpacity: 1
+                            }).addTo(map);
+                            markersGreen.push(m);
+                        });
+
+                        // Points rouges
+                        offStreet.forEach(pt => {
+                            let [lat, lon] = pt;
+                            let m = L.circleMarker([lat, lon], {
+                                radius: 4,
+                                color: 'red',
+                                fillColor: 'red',
+                                fillOpacity: 1
+                            }).addTo(map);
+                            markersRed.push(m);
+                        });
+
+                        // Affiche le résultat pour CE segment
+                        alert("Segment #" + (clickedPoints.length / 2) +
+                            "\nPoints sur la rue: " + onStreet.length +
+                            "\nHors rue: " + offStreet.length +
+                            "\nVitesse moyenne (m/s) : " + avgSpeed.toFixed(2));
+                    })
+                    .catch(err => console.error(err))
+                    .then(() => {
+                        // === 3) DEUXIEME FETCH => on veut la somme entre le TOUT PREMIER point (clickedPoints[0]) et le DERNIER point B ===
+                        if (clickedPoints.length >= 2) {
+                            let first = clickedPoints[0]; // tout premier point
+                            // B = (déjà défini ci-dessus)
+
+                            fetch("/compute", {
+                                    method: "POST",
+                                    headers: {
+                                        "Content-Type": "application/json"
+                                    },
+                                    body: JSON.stringify({
+                                        latA: first[0],
+                                        lonA: first[1],
+                                        latB: B[0],
+                                        lonB: B[1]
+                                    })
+                                })
+                                .then(r => r.json())
+                                .then(data2 => {
+                                    let sumOn = data2.onStreet.length;
+                                    let sumOff = data2.offStreet.length;
+                                    let sumSpeed = data2.avgSpeed; // <-- vitesse moyenne global (A->Z)
+                                    alert("Total depuis le tout premier point jusqu'à ce point:\n" +
+                                        "OnStreet: " + sumOn +
+                                        "\nOffStreet: " + sumOff +
+                                        "\nVitesse moyenne (m/s) : " + sumSpeed.toFixed(2));
+                                })
+                                .catch(err => console.error("Erreur sum:", err));
+                        }
+                    });
+            } else {
+                // On a un clic impair => c'est juste le début d'un segment
+                // (on a déjà placé un marker plus haut avec labelChar)
+            }
+        }
+
+        map.on('click', onMapClick);
+
+        /*
+        =============================================================
+          A chaque clic:
+          - On pose un marker nommé 'A', 'B', 'C', ...
+          Quand on a 2 clics => segment => /compute => /compute total
+          On affiche la vitesse moyenne (avgSpeed) pour le segment
+          et la somme (premier->dernier)
+        =============================================================
+        */
+    </script>
+</body>
+
+</html>

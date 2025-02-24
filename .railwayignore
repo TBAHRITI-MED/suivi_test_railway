@@ -1,0 +1,5 @@
+__pycache__/
+*.log
+.env
+.vscode/
+realtime_points.csv
