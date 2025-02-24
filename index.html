@@ -46,9 +46,10 @@
             .then(res => res.json())
             .then(data => {
                 let points = data.points;
-                console.log("Points chargés:", points.length);
+                console.log("Points chargés:", points.length, points);
                 points.forEach(pt => {
-                    let [lat, lon] = pt;
+                    let lat = pt.latitude; // 👈 Correctement extraire latitude
+                    let lon = pt.longitude; // 👈 Correctement extraire longitude
                     let m = L.circleMarker([lat, lon], {
                         radius: 4,
                         color: 'gray',
@@ -58,7 +59,8 @@
                     markersAll.push(m);
                 });
             })
-            .catch(err => console.error(err));
+            .catch(err => console.error("Erreur de chargement des points:", err));
+
 
         function onMapClick(e) {
             // On ajoute ce point dans clickedPoints
