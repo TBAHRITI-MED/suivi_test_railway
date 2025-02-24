@@ -39,6 +39,7 @@ def push_data():
         return jsonify({"error": "No JSON body"}), 400
 
     body = request.json
+    print(f"📩 Données reçues : {body}")
 
     try:
         lat = float(body.get("latitude", 0))
