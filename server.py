@@ -39,7 +39,13 @@ def push_data():
         return jsonify({"error": "No JSON body"}), 400
 
     body = request.json
-    print(f"📩 Données reçues : {body}")
+
+    # Vérifier si les données sont sous forme de chaîne JSON imbriquée
+    if "data" in body:
+        try:
+            body = json.loads(body["data"])  # 🔴 Décoder correctement la chaîne JSON imbriquée
+        except json.JSONDecodeError as e:
+            return jsonify({"error": "Invalid JSON format", "details": str(e)}), 400
 
     try:
         lat = float(body.get("latitude", 0))
