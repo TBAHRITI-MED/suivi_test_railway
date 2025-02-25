@@ -43,25 +43,37 @@ def analyser_ralentissement(speed, avg_speed):
     print(f"🚀 Fonction appelée avec speed={speed}, avg_speed={avg_speed}")
     prompt = f"La vitesse actuelle est {speed} m/s, alors que la moyenne est {avg_speed} m/s. Pourquoi pourrait-il y avoir un ralentissement à cet endroit ?"
     print(f"📨 Envoi du prompt : {prompt}")
+    
     try:
-        response = openai.ChatCompletion.create(
+        # Import the OpenAI client at the function level to avoid import errors
+        from openai import OpenAI
+        
+        # Initialize client with API key
+        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        
+        # Call the API using the new format
+        response = client.chat.completions.create(
             model="gpt-4",
             messages=[
                 {"role": "system", "content": "Tu es un expert en analyse du trafic."},
                 {"role": "user", "content": prompt}
             ]
         )
+        
         print(f"✅ Réponse brute OpenAI : {response}")
-        if "choices" in response and response["choices"]:
-            result = response["choices"][0]["message"]["content"]
+        
+        # Extract the response content
+        if hasattr(response, 'choices') and response.choices:
+            result = response.choices[0].message.content
             print(f"🔍 Réponse analysée : {result}")
             return result
         else:
             print("⚠️ OpenAI a répondu mais sans contenu !")
             return "Aucune explication trouvée."
+            
     except Exception as e:
         print(f"❌ Erreur OpenAI : {e}")
-        return "Erreur lors de l'analyse du ralentissement."
+        return f"Erreur lors de l'analyse du ralentissement: {str(e)}"
 
 # ---------------------------------------------------
 # 3. Route pour recevoir et stocker les données en temps réel
