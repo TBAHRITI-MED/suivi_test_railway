@@ -6,6 +6,7 @@ import os
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
+import openai
 
 app = Flask(__name__)
 CORS(app)  # Autorise les requêtes cross-origin
@@ -13,7 +14,7 @@ CORS(app)  # Autorise les requêtes cross-origin
 # ---------------------------------------------------
 # 1. Configuration de la base de données PostgreSQL
 # ---------------------------------------------------
-app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv("DATABASE_URL") 
+app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv("DATABASE_URL")
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
@@ -40,10 +41,10 @@ def push_data():
 
     body = request.json
 
-    # Vérifier si les données sont sous forme de chaîne JSON imbriquée
+    # Si les données sont envoyées sous la clé "data", décoder la chaîne JSON imbriquée
     if "data" in body:
         try:
-            body = json.loads(body["data"])  # 🔴 Décoder correctement la chaîne JSON imbriquée
+            body = json.loads(body["data"])
         except json.JSONDecodeError as e:
             return jsonify({"error": "Invalid JSON format", "details": str(e)}), 400
 
@@ -54,12 +55,12 @@ def push_data():
     except ValueError:
         return jsonify({"error": "Invalid numeric values"}), 400
 
-    # **Calcul de la vitesse moyenne**
+    # Calcul de la vitesse moyenne actuelle (pour info)
     total_speed = db.session.query(db.func.sum(SensorData.speed)).scalar() or 0
     total_count = db.session.query(SensorData).count() or 1  # éviter division par zéro
     avg_speed = total_speed / total_count
 
-    # **Détection du ralentissement (plus de 20% de réduction de vitesse)**
+    # Détection d'un ralentissement (si speed < 80% de la moyenne et que la moyenne > 0)
     ralentissement = False
     if avg_speed > 0 and speed < avg_speed * 0.8:
         ralentissement = True
@@ -69,7 +70,6 @@ def push_data():
     new_data = SensorData(latitude=lat, longitude=lon, speed=speed)
     db.session.add(new_data)
     db.session.commit()
-
     print(f"📡 Nouveau point ajouté en BD: lat={lat}, lon={lon}, speed={speed}")
 
     return jsonify({
@@ -79,9 +79,64 @@ def push_data():
         "slowdown_detected": ralentissement
     }), 200
 
+# ---------------------------------------------------
+# 4. Intégration d'OpenAI pour analyser un ralentissement
+# ---------------------------------------------------
+openai.api_key = os.getenv("OPENAI_API_KEY")
+if not openai.api_key:
+    raise ValueError("❌ Erreur : La variable d'environnement 'OPENAI_API_KEY' n'est pas définie !")
+
+def analyser_ralentissement(speed, avg_speed):
+    print(f"🚀 Fonction appelée avec speed={speed}, avg_speed={avg_speed}")
+    prompt = f"La vitesse actuelle est {speed} m/s, alors que la moyenne est {avg_speed} m/s. Pourquoi pourrait-il y avoir un ralentissement à cet endroit ?"
+    print(f"📨 Envoi du prompt : {prompt}")
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "Tu es un expert en analyse du trafic."},
+                {"role": "user", "content": prompt}
+            ]
+        )
+        print(f"✅ Réponse brute OpenAI : {response}")
+        if "choices" in response and response["choices"]:
+            result = response["choices"][0]["message"]["content"]
+            print(f"🔍 Réponse analysée : {result}")
+            return result
+        else:
+            print("⚠️ OpenAI a répondu mais sans contenu !")
+            return "Aucune explication trouvée."
+    except Exception as e:
+        print(f"❌ Erreur OpenAI : {e}")
+        return "Erreur lors de l'analyse du ralentissement."
+
+@app.route("/explain_slowdown", methods=["POST"])
+def explain_slowdown():
+    data = request.json
+    try:
+        current_speed = float(data.get("speed", 0))
+    except ValueError:
+        return jsonify({"error": "Invalid numeric value for speed"}), 400
+
+    points = SensorData.query.all()
+    speeds = [p.speed for p in points if p.speed > 0]
+    if not speeds:
+        return jsonify({"error": "Pas assez de données pour comparer"}), 400
+
+    avg_speed = sum(speeds) / len(speeds)
+    if current_speed < avg_speed * 0.8:
+        explication = analyser_ralentissement(current_speed, avg_speed)
+    else:
+        explication = "Pas de ralentissement détecté."
+
+    return jsonify({
+        "explanation": explication,
+        "current_speed": current_speed,
+        "average_speed": avg_speed
+    })
 
 # ---------------------------------------------------
-# 4. Fonctions utilitaires : distance point-segment
+# 5. Fonctions utilitaires : distance point-segment
 # ---------------------------------------------------
 def latlon_to_xy(lat, lon, lat0, lon0):
     R = 111320.0  # Nombre de mètres par degré approximativement
@@ -94,7 +149,6 @@ def distance_point_to_segment(px, py, ax, ay, bx, by):
     ABy = by - ay
     APx = px - ax
     APy = py - ay
-
     AB2 = ABx * ABx + ABy * ABy
     if AB2 == 0:
         return math.hypot(px - ax, py - ay)
@@ -117,7 +171,7 @@ def is_point_on_segment(latP, lonP, latA, lonA, latB, lonB, corridor_width=30):
     return dist <= corridor_width
 
 # ---------------------------------------------------
-# 5. Routes pour les requêtes et analyses
+# 6. Routes pour les requêtes et analyses
 # ---------------------------------------------------
 @app.route("/")
 def index():
@@ -199,45 +253,10 @@ def compute_segment_points(latA, lonA, latB, lonB, corridor=30.0):
             onCount += 1
         else:
             offCount += 1
-
     return onCount, offCount
 
-import openai
-
-openai.api_key = os.getenv("OPENAI_API_KEY")
-
-if not openai.api_key:
-    raise ValueError("❌ Erreur : La variable d'environnement 'OPENAI_API_KEY' n'est pas définie !")
-def analyser_ralentissement(speed, avg_speed):
-    print(f"🚀 Fonction appelée avec speed={speed}, avg_speed={avg_speed}")
-    
-    prompt = f"La vitesse actuelle est {speed} m/s, alors que la moyenne est {avg_speed} m/s. Pourquoi pourrait-il y avoir un ralentissement à cet endroit ?"
-    print(f"📨 Envoi du prompt : {prompt}")
-
-    try:
-        response = openai.ChatCompletion.create(
-            model="gpt-4",
-            messages=[{"role": "user", "content": prompt}]
-        )
-        
-        print(f"✅ Réponse brute OpenAI : {response}")  # 🔴 Ajout du print
-        
-        if "choices" in response and response["choices"]:
-            result = response["choices"][0]["message"]["content"]
-            print(f"🔍 Réponse analysée : {result}")  # 🔴 Ajout du print
-            return result
-        else:
-            print("⚠️ OpenAI a répondu mais sans contenu !")
-            return "Aucune explication trouvée."
-
-    except Exception as e:
-        print(f"❌ Erreur OpenAI : {e}")  # 🔴 Capture les erreurs
-        return "Erreur lors de l'analyse du ralentissement."
-
-
-
 # ---------------------------------------------------
-# 6. Lancement du serveur Flask sur Render
+# 7. Lancement du serveur Flask sur Render
 # ---------------------------------------------------
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5001))  # Render attribue un port dynamique
