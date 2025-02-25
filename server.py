@@ -204,23 +204,42 @@ def compute_segment_points(latA, lonA, latB, lonB, corridor=30.0):
 
 import openai
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+import os
+
+# Vérification de la clé API OpenAI
+openai_api_key = os.getenv("OPENAI_API_KEY")
+if not openai_api_key:
+    print("❌ Clé API OpenAI manquante !")
+else:
+    print("✅ Clé API OpenAI trouvée.")
+
+openai.api_key = openai_api_key
 
 def analyser_ralentissement(speed, avg_speed):
     prompt = f"La vitesse actuelle est {speed} m/s, alors que la moyenne est {avg_speed} m/s. Pourquoi pourrait-il y avoir un ralentissement à cet endroit ?"
     
     print(f"📨 Envoi de la requête à OpenAI avec prompt : {prompt}")
 
-    response = openai.ChatCompletion.create(
-        model="gpt-4",
-        messages=[
-            {"role": "system", "content": "Tu es un expert en analyse du trafic."},
-            {"role": "user", "content": prompt}
-        ]
-    )
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "Tu es un expert en analyse du trafic."},
+                {"role": "user", "content": prompt}
+            ]
+        )
+        
+        print(f"✅ Réponse OpenAI reçue : {response}")  # 🔴 Ajoute ce print
+        return response["choices"][0]["message"]["content"]
 
-    print(f"✅ Réponse OpenAI reçue : {response}")  # 🔴 Ajoute ce print
-    return response["choices"][0]["message"]["content"]
+    except Exception as e:
+        print(f"❌ Erreur OpenAI : {e}")  # 🔴 Capture les erreurs
+        return "Erreur lors de l'analyse du ralentissement."
+
+# Test d'exécution
+explication = analyser_ralentissement(5, 10)
+print("🔍 Analyse de l'IA :", explication)
+
 
 
 # ---------------------------------------------------
