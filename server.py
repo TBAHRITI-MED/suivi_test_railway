@@ -32,6 +32,38 @@ with app.app_context():
     db.create_all()
 
 # ---------------------------------------------------
+# 4. Intégration d'OpenAI pour analyser un ralentissement
+# ---------------------------------------------------
+
+openai.api_key = os.getenv("OPENAI_API_KEY")
+if not openai.api_key:
+    raise ValueError("❌ Erreur : La variable d'environnement 'OPENAI_API_KEY' n'est pas définie !")
+
+def analyser_ralentissement(speed, avg_speed):
+    print(f"🚀 Fonction appelée avec speed={speed}, avg_speed={avg_speed}")
+    prompt = f"La vitesse actuelle est {speed} m/s, alors que la moyenne est {avg_speed} m/s. Pourquoi pourrait-il y avoir un ralentissement à cet endroit ?"
+    print(f"📨 Envoi du prompt : {prompt}")
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "Tu es un expert en analyse du trafic."},
+                {"role": "user", "content": prompt}
+            ]
+        )
+        print(f"✅ Réponse brute OpenAI : {response}")
+        if "choices" in response and response["choices"]:
+            result = response["choices"][0]["message"]["content"]
+            print(f"🔍 Réponse analysée : {result}")
+            return result
+        else:
+            print("⚠️ OpenAI a répondu mais sans contenu !")
+            return "Aucune explication trouvée."
+    except Exception as e:
+        print(f"❌ Erreur OpenAI : {e}")
+        return "Erreur lors de l'analyse du ralentissement."
+
+# ---------------------------------------------------
 # 3. Route pour recevoir et stocker les données en temps réel
 # ---------------------------------------------------
 @app.route("/api/push_data", methods=["POST"])
@@ -62,9 +94,12 @@ def push_data():
 
     # Détection d'un ralentissement (si speed < 80% de la moyenne et que la moyenne > 0)
     ralentissement = False
+    explication = None
     if avg_speed > 0 and speed < avg_speed * 0.8:
         ralentissement = True
         print(f"⚠️ Ralentissement détecté ! Vitesse actuelle: {speed} m/s, Moyenne: {avg_speed:.2f} m/s")
+        # Appeler OpenAI immédiatement lors de la détection du ralentissement
+        explication = analyser_ralentissement(speed, avg_speed)
 
     # Sauvegarde en base de données
     new_data = SensorData(latitude=lat, longitude=lon, speed=speed)
@@ -72,43 +107,18 @@ def push_data():
     db.session.commit()
     print(f"📡 Nouveau point ajouté en BD: lat={lat}, lon={lon}, speed={speed}")
 
-    return jsonify({
+    response_data = {
         "status": "Data saved",
         "current_speed": speed,
         "average_speed": avg_speed,
         "slowdown_detected": ralentissement
-    }), 200
-
-# ---------------------------------------------------
-# 4. Intégration d'OpenAI pour analyser un ralentissement
-# ---------------------------------------------------
-openai.api_key = os.getenv("OPENAI_API_KEY")
-if not openai.api_key:
-    raise ValueError("❌ Erreur : La variable d'environnement 'OPENAI_API_KEY' n'est pas définie !")
-
-def analyser_ralentissement(speed, avg_speed):
-    print(f"🚀 Fonction appelée avec speed={speed}, avg_speed={avg_speed}")
-    prompt = f"La vitesse actuelle est {speed} m/s, alors que la moyenne est {avg_speed} m/s. Pourquoi pourrait-il y avoir un ralentissement à cet endroit ?"
-    print(f"📨 Envoi du prompt : {prompt}")
-    try:
-        response = openai.ChatCompletion.create(
-            model="gpt-4",
-            messages=[
-                {"role": "system", "content": "Tu es un expert en analyse du trafic."},
-                {"role": "user", "content": prompt}
-            ]
-        )
-        print(f"✅ Réponse brute OpenAI : {response}")
-        if "choices" in response and response["choices"]:
-            result = response["choices"][0]["message"]["content"]
-            print(f"🔍 Réponse analysée : {result}")
-            return result
-        else:
-            print("⚠️ OpenAI a répondu mais sans contenu !")
-            return "Aucune explication trouvée."
-    except Exception as e:
-        print(f"❌ Erreur OpenAI : {e}")
-        return "Erreur lors de l'analyse du ralentissement."
+    }
+    
+    # Ajouter l'explication s'il y a un ralentissement
+    if ralentissement and explication:
+        response_data["slowdown_explanation"] = explication
+    
+    return jsonify(response_data), 200
 
 @app.route("/explain_slowdown", methods=["POST"])
 def explain_slowdown():
