@@ -56,7 +56,7 @@ def analyser_ralentissement_async(speed, avg_speed):
         
         # Appel API avec un timeout court et un prompt simplifié
         response = client.chat.completions.create(
-            model="gpt-3.5-turbo",  # Plus rapide que GPT-4
+            model="gpt-4",  
             messages=[
                 {"role": "system", "content": "Tu es un expert trafic. Réponse courte (30 mots max)."},
                 {"role": "user", "content": f"Pourquoi vitesse={speed}m/s vs moyenne={avg_speed:.2f}m/s? Raison courte."}
