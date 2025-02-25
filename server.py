@@ -165,7 +165,7 @@ def compute():
 def compute_multiple():
     data = request.json
     segments = data["segments"]
-    
+
     results = []
     for idx, segment in enumerate(segments):
         latA, lonA = segment[0]
@@ -176,7 +176,7 @@ def compute_multiple():
             "onCount": onCount,
             "offCount": offCount
         })
-    
+
     if len(segments) > 1:
         latA, lonA = segments[0][0]
         latZ, lonZ = segments[-1][1]
@@ -186,14 +186,14 @@ def compute_multiple():
             "onCount": onCount,
             "offCount": offCount
         })
-    
+
     return jsonify({"results": results})
 
 def compute_segment_points(latA, lonA, latB, lonB, corridor=30.0):
     onCount = 0
     offCount = 0
     points = SensorData.query.all()
-    
+
     for p in points:
         if is_point_on_segment(p.latitude, p.longitude, latA, lonA, latB, lonB, corridor):
             onCount += 1
@@ -202,17 +202,17 @@ def compute_segment_points(latA, lonA, latB, lonB, corridor=30.0):
 
     return onCount, offCount
 
-import openai
+from openai import OpenAI
+
+client = OpenAI()
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 def analyser_ralentissement(speed, avg_speed):
     prompt = f"La vitesse actuelle est {speed} m/s, alors que la moyenne est {avg_speed} m/s. Pourquoi pourrait-il y avoir un ralentissement à cet endroit ?"
-    response = openai.ChatCompletion.create(
-        model="gpt-4",
-        messages=[{"role": "user", "content": prompt}]
-    )
-    return response["choices"][0]["message"]["content"]
+    response = client.chat.completions.create(model="gpt-4",
+    messages=[{"role": "user", "content": prompt}])
+    return response.choices[0].message.content
 
 # Test d'exécution
 explication = analyser_ralentissement(5, 10)
