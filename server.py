@@ -204,7 +204,10 @@ def compute_segment_points(latA, lonA, latB, lonB, corridor=30.0):
 
 import openai
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+openai.api_key = os.getenv("OPENAI_API_KEY")
+
+if not openai.api_key:
+    raise ValueError("❌ Erreur : La variable d'environnement 'OPENAI_API_KEY' n'est pas définie !")
 def analyser_ralentissement(speed, avg_speed):
     print(f"🚀 Fonction appelée avec speed={speed}, avg_speed={avg_speed}")
     
