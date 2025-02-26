@@ -34,6 +34,7 @@ class SensorData(db.Model):
     latitude = db.Column(db.Float, nullable=False)
     longitude = db.Column(db.Float, nullable=False)
     speed = db.Column(db.Float, nullable=False)
+    timestamp = db.Column(db.Float, default=time.time)  # Ajout d'un timestamp
 
 # Création de la base de données si elle n'existe pas encore
 with app.app_context():
@@ -140,8 +141,9 @@ def push_data():
         # Lancer l'analyse en arrière-plan (ne bloque pas)
         check_and_analyze_slowdown(speed, avg_speed)
 
-    # Sauvegarde en base de données
-    new_data = SensorData(latitude=lat, longitude=lon, speed=speed)
+    # Sauvegarde en base de données avec timestamp actuel
+    current_time = time.time()
+    new_data = SensorData(latitude=lat, longitude=lon, speed=speed, timestamp=current_time)
     db.session.add(new_data)
     db.session.commit()
     print(f"📡 Nouveau point ajouté en BD: lat={lat}, lon={lon}, speed={speed}")
@@ -150,7 +152,8 @@ def push_data():
         "status": "Data saved",
         "current_speed": speed,
         "average_speed": avg_speed,
-        "slowdown_detected": ralentissement
+        "slowdown_detected": ralentissement,
+        "is_latest": True  # Indiquer que c'est le dernier point
     }
     
     # Ajouter l'explication si disponible et s'il y a ralentissement
@@ -170,7 +173,25 @@ def get_latest_analysis():
     })
 
 # ---------------------------------------------------
-# 6. Fonctions utilitaires : distance point-segment
+# 6. Nouvelle route pour obtenir uniquement le dernier point
+# ---------------------------------------------------
+@app.route("/get_latest_point", methods=["GET"])
+def get_latest_point():
+    latest_point = SensorData.query.order_by(SensorData.timestamp.desc()).first()
+    
+    if latest_point:
+        data = {
+            "latitude": latest_point.latitude,
+            "longitude": latest_point.longitude,
+            "speed": latest_point.speed,
+            "timestamp": latest_point.timestamp
+        }
+        return jsonify({"latest_point": data})
+    else:
+        return jsonify({"error": "Aucun point disponible"}), 404
+
+# ---------------------------------------------------
+# 7. Fonctions utilitaires : distance point-segment
 # ---------------------------------------------------
 def latlon_to_xy(lat, lon, lat0, lon0):
     R = 111320.0  # Nombre de mètres par degré approximativement
@@ -205,7 +226,7 @@ def is_point_on_segment(latP, lonP, latA, lonA, latB, lonB, corridor_width=30):
     return dist <= corridor_width
 
 # ---------------------------------------------------
-# 7. Routes pour les requêtes et analyses
+# 8. Routes pour les requêtes et analyses
 # ---------------------------------------------------
 @app.route("/")
 def index():
@@ -214,7 +235,22 @@ def index():
 @app.route("/get_all_points", methods=["GET"])
 def get_all_points():
     points = SensorData.query.all()
-    data = [{"latitude": p.latitude, "longitude": p.longitude, "speed": p.speed} for p in points]
+    
+    # Rechercher le point avec le timestamp le plus récent
+    latest_point = SensorData.query.order_by(SensorData.timestamp.desc()).first()
+    latest_id = latest_point.id if latest_point else None
+    
+    # Préparer les données avec un champ "is_latest" pour marquer le dernier point
+    data = [
+        {
+            "latitude": p.latitude, 
+            "longitude": p.longitude, 
+            "speed": p.speed, 
+            "is_latest": (p.id == latest_id)  # Marquer si c'est le point le plus récent
+        } 
+        for p in points
+    ]
+    
     return jsonify({"points": data})
 
 @app.route("/compute", methods=["POST"])
@@ -290,7 +326,7 @@ def compute_segment_points(latA, lonA, latB, lonB, corridor=30.0):
     return onCount, offCount
 
 # ---------------------------------------------------
-# 8. Lancement du serveur Flask sur Render
+# 9. Lancement du serveur Flask sur Render
 # ---------------------------------------------------
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5001))  # Render attribue un port dynamique
