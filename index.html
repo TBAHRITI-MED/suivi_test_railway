@@ -1,216 +1,198 @@
 <!DOCTYPE html>
-<html lang="fr">
+<html>
 
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Suivi de Localisation en Temps Réel</title>
+    <meta charset="utf-8" />
+    <title>Plusieurs segments (A→B, B→C, etc.) avec total A→Z et speed</title>
     <style>
+        html,
         body {
             margin: 0;
             padding: 0;
-            font-family: Arial, sans-serif;
+            height: 100%;
         }
         
         #map {
-            height: 100vh;
             width: 100%;
-        }
-        
-        #info-panel {
-            position: absolute;
-            top: 10px;
-            right: 10px;
-            background: white;
-            padding: 15px;
-            border-radius: 5px;
-            box-shadow: 0 0 10px rgba(0, 0, 0, 0.2);
-            z-index: 1000;
-        }
-        
-        .latest-point {
-            color: red;
-            font-weight: bold;
-        }
-        
-        .speed-info {
-            margin-top: 10px;
-        }
-        
-        .panel-title {
-            margin-top: 0;
-            margin-bottom: 10px;
-            text-align: center;
-        }
-        
-        .location-emoji {
-            font-size: 1.5em;
-            vertical-align: middle;
-            margin-left: 5px;
+            height: 100%;
         }
     </style>
+
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.3/dist/leaflet.css" />
 </head>
 
 <body>
+
     <div id="map"></div>
-    <div id="info-panel">
-        <h3 class="panel-title">Informations en temps réel</h3>
-        <div id="latest-location" class="latest-point">
-            Position actuelle: Chargement...
-        </div>
-        <div id="speed-info" class="speed-info">
-            Vitesse: Chargement...
-        </div>
-    </div>
 
-    <!-- Inclure l'API Google Maps (remplacez YOUR_API_KEY par votre clé API) -->
-    <script src="https://maps.googleapis.com/maps/api/js?key=YOUR_API_KEY&callback=initMap" async defer></script>
-
+    <!-- Leaflet JS -->
+    <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.3/dist/leaflet.js"></script>
     <script>
-        // Variables globales
-        let map;
-        let markers = [];
-        let currentLocationMarker = null;
-        let trackingEnabled = true;
+        let map = L.map('map').setView([49.2484420, 4.0415017], 14);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap'
+        }).addTo(map);
 
-        // Initialisation de la carte
-        function initMap() {
-            map = new google.maps.Map(document.getElementById('map'), {
-                center: {
-                    lat: 48.856614,
-                    lng: 2.3522219
-                }, // Paris par défaut
-                zoom: 15,
-                mapTypeId: 'roadmap',
-                mapTypeControl: true,
-                fullscreenControl: true,
-                streetViewControl: true,
-                zoomControl: true
-            });
+        // --- Variables globales ---
+        let clickedPoints = []; // mémorise tous les points cliqués
+        let markersAll = []; // marqueurs gris initiaux
+        let markersGreen = []; // marqueurs verts
+        let markersRed = []; // marqueurs rouges
+        let polylines = []; // lignes tracées
 
-            // Charger les points initiaux
-            fetchAndDisplayPoints();
+        // 1) Charger tous les points initiaux en GRIS
+        fetch("/get_all_points")
+            .then(res => res.json())
+            .then(data => {
+                let points = data.points;
+                console.log("Points chargés:", points.length, points);
+                points.forEach(pt => {
+                    let lat = pt.latitude; // 👈 Correctement extraire latitude
+                    let lon = pt.longitude; // 👈 Correctement extraire longitude
+                    let m = L.circleMarker([lat, lon], {
+                        radius: 4,
+                        color: 'gray',
+                        fillColor: 'gray',
+                        fillOpacity: 1
+                    }).addTo(map);
+                    markersAll.push(m);
+                });
+            })
+            .catch(err => console.error("Erreur de chargement des points:", err));
 
-            // Configurer l'actualisation automatique
-            setInterval(fetchLatestPoint, 5000); // Actualiser uniquement le dernier point toutes les 5 secondes
 
-            // Actualiser tous les points moins souvent (pour économiser les ressources)
-            setInterval(fetchAndDisplayPoints, 30000); // Actualiser tous les points toutes les 30 secondes
-        }
+        function onMapClick(e) {
+            // On ajoute ce point dans clickedPoints
+            clickedPoints.push([e.latlng.lat, e.latlng.lng]);
 
-        // Fonction pour récupérer et afficher tous les points
-        function fetchAndDisplayPoints() {
-            fetch('/get_all_points')
-                .then(response => response.json())
-                .then(data => {
-                    // Effacer tous les marqueurs existants (sauf la position actuelle)
-                    clearAllMarkers();
+            // Calcule la lettre associée (A,B,C,...) 
+            let labelIndex = clickedPoints.length - 1; // 0 pour premier clic
+            let labelChar = String.fromCharCode(65 + labelIndex); // 'A' + labelIndex
 
-                    // Variable pour stocker la position actuelle (s'il y en a une)
-                    let latestPoint = null;
+            // Placer un marker avec ce label
+            let marker = L.marker([e.latlng.lat, e.latlng.lng]).addTo(map);
+            marker.bindPopup(labelChar).openPopup();
 
-                    // Parcourir tous les points reçus
-                    data.points.forEach(point => {
-                        const position = {
-                            lat: point.latitude,
-                            lng: point.longitude
-                        };
+            // Si on a un nombre pair de points, on peut former un segment
+            if (clickedPoints.length % 2 === 0) {
+                let n = clickedPoints.length;
+                let A = clickedPoints[n - 2]; // avant-dernier
+                let B = clickedPoints[n - 1]; // dernier
 
-                        // Si c'est le dernier point, enregistrer pour traitement séparé
-                        if (point.is_latest) {
-                            latestPoint = point;
-                        } else {
-                            // Marqueur standard pour les autres points
-                            const marker = new google.maps.Marker({
-                                position: position,
-                                map: map,
-                                icon: {
-                                    path: google.maps.SymbolPath.CIRCLE,
-                                    scale: 5,
-                                    fillColor: "#FF0000",
-                                    fillOpacity: 0.5,
-                                    strokeColor: "#FFFFFF",
-                                    strokeWeight: 1,
-                                },
-                                title: `Point - Vitesse: ${point.speed} m/s`
-                            });
+                // 1) Dessiner la ligne (A->B) en bleu
+                let poly = L.polyline([A, B], {
+                    color: 'blue'
+                }).addTo(map);
+                polylines.push(poly);
 
-                            markers.push(marker);
+                // 2) Premier fetch => /compute pour CE segment
+                fetch("/compute", {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json"
+                        },
+                        body: JSON.stringify({
+                            latA: A[0],
+                            lonA: A[1],
+                            latB: B[0],
+                            lonB: B[1]
+                        })
+                    })
+                    .then(res => res.json())
+                    .then(data => {
+                        let onStreet = data.onStreet;
+                        let offStreet = data.offStreet;
+                        let avgSpeed = data.avgSpeed; // <-- vitesse moyenne sur CE segment
+                        console.log("onStreet:", onStreet.length, "offStreet:", offStreet.length, "avgSpeed:", avgSpeed);
+
+                        // Supprime TOUTES les couches existantes (gris, vert, rouge)
+                        markersAll.forEach(m => map.removeLayer(m));
+                        markersGreen.forEach(m => map.removeLayer(m));
+                        markersRed.forEach(m => map.removeLayer(m));
+                        markersAll = [];
+                        markersGreen = [];
+                        markersRed = [];
+
+                        // Points verts
+                        onStreet.forEach(pt => {
+                            let [lat, lon] = pt;
+                            let m = L.circleMarker([lat, lon], {
+                                radius: 4,
+                                color: 'green',
+                                fillColor: 'green',
+                                fillOpacity: 1
+                            }).addTo(map);
+                            markersGreen.push(m);
+                        });
+
+                        // Points rouges
+                        offStreet.forEach(pt => {
+                            let [lat, lon] = pt;
+                            let m = L.circleMarker([lat, lon], {
+                                radius: 4,
+                                color: 'red',
+                                fillColor: 'red',
+                                fillOpacity: 1
+                            }).addTo(map);
+                            markersRed.push(m);
+                        });
+
+                        // Affiche le résultat pour CE segment
+                        alert("Segment #" + (clickedPoints.length / 2) +
+                            "\nPoints sur la rue: " + onStreet.length +
+                            "\nHors rue: " + offStreet.length +
+                            "\nVitesse moyenne (m/s) : " + avgSpeed.toFixed(2));
+                    })
+                    .catch(err => console.error(err))
+                    .then(() => {
+                        // === 3) DEUXIEME FETCH => on veut la somme entre le TOUT PREMIER point (clickedPoints[0]) et le DERNIER point B ===
+                        if (clickedPoints.length >= 2) {
+                            let first = clickedPoints[0]; // tout premier point
+                            // B = (déjà défini ci-dessus)
+
+                            fetch("/compute", {
+                                    method: "POST",
+                                    headers: {
+                                        "Content-Type": "application/json"
+                                    },
+                                    body: JSON.stringify({
+                                        latA: first[0],
+                                        lonA: first[1],
+                                        latB: B[0],
+                                        lonB: B[1]
+                                    })
+                                })
+                                .then(r => r.json())
+                                .then(data2 => {
+                                    let sumOn = data2.onStreet.length;
+                                    let sumOff = data2.offStreet.length;
+                                    let sumSpeed = data2.avgSpeed; // <-- vitesse moyenne global (A->Z)
+                                    alert("Total depuis le tout premier point jusqu'à ce point:\n" +
+                                        "OnStreet: " + sumOn +
+                                        "\nOffStreet: " + sumOff +
+                                        "\nVitesse moyenne (m/s) : " + sumSpeed.toFixed(2));
+                                })
+                                .catch(err => console.error("Erreur sum:", err));
                         }
                     });
-
-                    // Traiter le dernier point séparément (s'il existe)
-                    if (latestPoint) {
-                        updateLatestPointDisplay(latestPoint);
-                    }
-                })
-                .catch(error => {
-                    console.error('Erreur lors de la récupération des points:', error);
-                });
-        }
-
-        // Fonction pour récupérer uniquement le dernier point
-        function fetchLatestPoint() {
-            fetch('/get_latest_point')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.latest_point) {
-                        const point = data.latest_point;
-                        updateLatestPointDisplay(point);
-                    }
-                })
-                .catch(error => {
-                    console.error('Erreur lors de la récupération du dernier point:', error);
-                });
-        }
-
-        // Mettre à jour l'affichage du dernier point
-        function updateLatestPointDisplay(point) {
-            const position = {
-                lat: point.latitude,
-                lng: point.longitude
-            };
-
-            // Mettre à jour ou créer le marqueur de position actuelle
-            if (currentLocationMarker) {
-                currentLocationMarker.setPosition(position);
             } else {
-                currentLocationMarker = new google.maps.Marker({
-                    position: position,
-                    map: map,
-                    icon: {
-                        path: google.maps.SymbolPath.CIRCLE,
-                        scale: 10,
-                        fillColor: "#4285F4",
-                        fillOpacity: 1,
-                        strokeColor: "#FFFFFF",
-                        strokeWeight: 2,
-                    },
-                    animation: google.maps.Animation.BOUNCE,
-                    title: `Position actuelle - Vitesse: ${point.speed} m/s`
-                });
+                // On a un clic impair => c'est juste le début d'un segment
+                // (on a déjà placé un marker plus haut avec labelChar)
             }
-
-            // Si le suivi est activé, centrer la carte sur la position actuelle
-            if (trackingEnabled) {
-                map.panTo(position);
-            }
-
-            // Mettre à jour le panneau d'informations
-            document.getElementById('latest-location').innerHTML =
-                `Position actuelle: ${point.latitude.toFixed(6)}, ${point.longitude.toFixed(6)}
-                 <span class="location-emoji">📍</span>`;
-            document.getElementById('speed-info').innerHTML =
-                `Vitesse: ${point.speed.toFixed(2)} m/s`;
         }
 
-        // Fonction pour effacer tous les marqueurs (sauf la position actuelle)
-        function clearAllMarkers() {
-            markers.forEach(marker => {
-                marker.setMap(null);
-            });
-            markers = [];
-        }
+        map.on('click', onMapClick);
+
+        /*
+        =============================================================
+          A chaque clic:
+          - On pose un marker nommé 'A', 'B', 'C', ...
+          Quand on a 2 clics => segment => /compute => /compute total
+          On affiche la vitesse moyenne (avgSpeed) pour le segment
+          et la somme (premier->dernier)
+        =============================================================
+        */
     </script>
 </body>
 
