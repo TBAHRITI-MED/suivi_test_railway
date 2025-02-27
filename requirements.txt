@@ -9,3 +9,4 @@ sqlalchemy==1.4.49
 psycopg2
 openai
 numpy
+sklearn
