@@ -1,0 +1,1482 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8" />
+    <title>Suivi de Localisation avec IA</title>
+    <style>
+        html,
+        body {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+        }
+        
+        #map {
+            width: 100%;
+            height: 100%;
+        }
+        
+        .info-panel {
+            position: absolute;
+            background: white;
+            padding: 15px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.2);
+            z-index: 1000;
+            max-width: 300px;
+        }
+        
+        #control-panel {
+            top: 10px;
+            right: 10px;
+        }
+        
+        #ml-panel {
+            top: 10px;
+            left: 10px;
+        }
+        
+        .panel-title {
+            margin-top: 0;
+            margin-bottom: 10px;
+            text-align: center;
+            font-weight: bold;
+        }
+        
+        .info-box {
+            margin-bottom: 10px;
+            padding: 8px;
+            background-color: #f5f5f5;
+            border-radius: 4px;
+        }
+        
+        .latest-point {
+            color: #d32f2f;
+            font-weight: bold;
+        }
+        
+        .button {
+            background-color: #4285F4;
+            color: white;
+            padding: 8px 12px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 5px;
+            margin-bottom: 5px;
+        }
+        
+        .button:hover {
+            background-color: #3b77db;
+        }
+        
+        .button-green {
+            background-color: #4CAF50;
+        }
+        
+        .button-red {
+            background-color: #f44336;
+        }
+        
+        .tab-container {
+            display: flex;
+            border-bottom: 1px solid #ccc;
+            margin-bottom: 10px;
+        }
+        
+        .tab {
+            padding: 5px 10px;
+            cursor: pointer;
+            border: 1px solid transparent;
+        }
+        
+        .tab.active {
+            border: 1px solid #ccc;
+            border-bottom: 1px solid white;
+            margin-bottom: -1px;
+            border-radius: 4px 4px 0 0;
+            background-color: #f8f8f8;
+            font-weight: bold;
+        }
+        
+        .zone-item {
+            margin-bottom: 8px;
+            padding: 5px;
+            border-radius: 4px;
+            background-color: #f5f5f5;
+        }
+        
+        .zone-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 5px;
+        }
+        
+        .anomaly-normal {
+            color: green;
+        }
+        
+        .anomaly-warning {
+            color: orange;
+        }
+        
+        .anomaly-danger {
+            color: #d32f2f;
+        }
+        
+        .chart-container {
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+            border-radius: 5px;
+            background-color: white;
+            padding: 10px;
+            margin-bottom: 15px;
+        }
+        
+        .kpi-box {
+            transition: all 0.3s ease;
+        }
+        
+        .kpi-box:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+        
+        #stats-time-range {
+            padding: 8px 12px;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+            background-color: white;
+            cursor: pointer;
+        }
+    </style>
+
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.3/dist/leaflet.css" />
+    <!-- Dans la section head, après Leaflet CSS -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Ajouter un nouvel onglet pour les statistiques -->
+    <div id="ml-stats-tab" class="tab-content" style="display:none">
+        <div class="info-box">
+            <h4 style="margin-top: 0;">Statistiques</h4>
+            <canvas id="speedChart" width="250" height="150"></canvas>
+            <div style="margin-top: 10px;">
+                <canvas id="zonesPieChart" width="250" height="150"></canvas>
+            </div>
+        </div>
+        <button id="refresh-stats-btn" class="button">
+        Actualiser
+    </button>
+    </div>
+</head>
+
+<body>
+    <div id="map"></div>
+
+    <!-- Panneau de contrôle principal -->
+    <div id="control-panel" class="info-panel">
+        <h3 class="panel-title">Suivi de Localisation</h3>
+
+        <div class="tab-container">
+            <div class="tab active" data-tab="info">Info</div>
+            <div class="tab" data-tab="segments">Segments</div>
+        </div>
+
+        <!-- Tab Info -->
+        <div id="info-tab" class="tab-content">
+            <div id="latest-location" class="info-box latest-point">
+                Position actuelle: Chargement...
+            </div>
+            <div id="speed-info" class="info-box">
+                Vitesse: Chargement...
+            </div>
+            <div id="point-count" class="info-box">
+                Points: Chargement...
+            </div>
+            <div id="openai-explanation" class="info-box" style="border-left: 3px solid #10a37f; display: none;">
+                <b>Explication IA:</b> <span id="openai-text">Pas d'explication disponible</span>
+            </div>
+            <button id="toggle-tracking" class="button">Désactiver suivi</button>
+        </div>
+
+        <!-- Tab Segments -->
+        <div id="segments-tab" class="tab-content" style="display:none">
+            <div id="segments-info" class="info-box">
+                Cliquez sur la carte pour placer des points A, B, C...
+                <br>Les segments seront analysés automatiquement.
+            </div>
+            <button id="clear-segments" class="button button-red">
+                Effacer les segments
+            </button>
+        </div>
+    </div>
+
+    <!-- Panneau d'analyse IA -->
+    <div id="ml-panel" class="info-panel">
+        <h3 class="panel-title">Analyse IA</h3>
+
+        <div class="tab-container">
+            <div class="tab active" data-tab="ml-status">Statut</div>
+            <div class="tab" data-tab="ml-zones">Zones</div>
+            <div class="tab" data-tab="ml-anomalies">Anomalies</div>
+            <div class="tab" data-tab="ml-stats">Statistiques</div>
+        </div>
+        <!-- Ajouter un nouvel onglet pour les statistiques -->
+        <!-- Onglet statistiques amélioré -->
+        <div id="ml-stats-tab" class="tab-content" style="display:none">
+            <div class="info-box">
+                <h4 style="margin-top: 0;">Tableau de bord statistique</h4>
+
+                <!-- Indicateurs clés en haut -->
+                <div id="kpi-container" style="display: flex; justify-content: space-between; margin-bottom: 15px;">
+                    <div class="kpi-box" style="flex: 1; text-align: center; padding: 8px; background-color: #f8f9fa; border-radius: 4px; margin: 0 5px;">
+                        <div style="font-size: 24px; font-weight: bold; color: #4285F4;" id="total-points">0</div>
+                        <div style="font-size: 12px;">Total points</div>
+                    </div>
+                    <div class="kpi-box" style="flex: 1; text-align: center; padding: 8px; background-color: #f8f9fa; border-radius: 4px; margin: 0 5px;">
+                        <div style="font-size: 24px; font-weight: bold; color: #EA4335;" id="avg-speed">0</div>
+                        <div style="font-size: 12px;">Vitesse moyenne</div>
+                    </div>
+                    <div class="kpi-box" style="flex: 1; text-align: center; padding: 8px; background-color: #f8f9fa; border-radius: 4px; margin: 0 5px;">
+                        <div style="font-size: 24px; font-weight: bold; color: #FBBC05;" id="anomaly-count">0</div>
+                        <div style="font-size: 12px;">Anomalies</div>
+                    </div>
+                </div>
+
+                <!-- Graphiques -->
+                <div class="chart-container" style="position: relative; margin-bottom: 15px;">
+                    <canvas id="speedChart" width="100%" height="120"></canvas>
+                </div>
+
+                <div style="display: flex; justify-content: space-between; margin-bottom: 15px;">
+                    <div class="chart-container" style="position: relative; width: 48%;">
+                        <canvas id="zonesPieChart" width="100%" height="150"></canvas>
+                    </div>
+                    <div class="chart-container" style="position: relative; width: 48%;">
+                        <canvas id="activityBarChart" width="100%" height="150"></canvas>
+                    </div>
+                </div>
+
+                <div class="chart-container" style="position: relative; margin-bottom: 15px;">
+                    <canvas id="speedHistogram" width="100%" height="120"></canvas>
+                </div>
+
+                <div class="chart-container" style="position: relative; margin-bottom: 15px;">
+                    <canvas id="heatmapTimeline" width="100%" height="120"></canvas>
+                </div>
+            </div>
+
+            <div style="display: flex; justify-content: space-between;">
+                <button id="refresh-stats-btn" class="button">
+            Actualiser
+        </button>
+                <select id="stats-time-range" class="button" style="background-color: white; color: #333;">
+            <option value="all">Toutes les données</option>
+            <option value="today">Aujourd'hui</option>
+            <option value="week">7 derniers jours</option>
+            <option value="month">30 derniers jours</option>
+        </select>
+            </div>
+        </div>
+
+        <!-- Tab Statut -->
+        <div id="ml-status-tab" class="tab-content">
+            <div id="ml-status" class="info-box">
+                <span>Chargement de l'analyse...</span>
+            </div>
+
+            <button id="train-model-btn" class="button button-green">
+                Entraîner modèle
+            </button>
+        </div>
+
+        <!-- Tab Zones -->
+        <div id="ml-zones-tab" class="tab-content" style="display:none">
+            <div class="info-box">
+                <h4 style="margin-top: 0;">Zones fréquentées</h4>
+                <div id="zones-list">Chargement des zones...</div>
+            </div>
+
+            <button id="show-zones-btn" class="button">
+                Afficher sur carte
+            </button>
+        </div>
+
+        <!-- Remplacer le contenu de l'onglet ml-anomalies-tab -->
+        <div id="ml-anomalies-tab" class="tab-content" style="display:none">
+            <div class="info-box">
+                <h4 style="margin-top: 0;">Anomalies détectées</h4>
+                <table id="anomalies-table" style="width:100%; border-collapse: collapse; margin-top: 10px;">
+                    <thead>
+                        <tr style="background-color: #f0f0f0;">
+                            <th style="padding: 5px; text-align: left; border-bottom: 1px solid #ddd;">Type</th>
+                            <th style="padding: 5px; text-align: center; border-bottom: 1px solid #ddd;">Score</th>
+                            <th style="padding: 5px; text-align: center; border-bottom: 1px solid #ddd;">Vitesse</th>
+                            <th style="padding: 5px; text-align: center; border-bottom: 1px solid #ddd;">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="anomalies-list">
+                        <tr>
+                            <td colspan="4" style="padding: 10px; text-align: center;">Chargement des anomalies...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <button id="get-anomalies-btn" class="button">
+        Actualiser
+    </button>
+
+            <button id="show-anomalies-btn" class="button">
+        Afficher sur carte
+    </button>
+        </div>
+
+        <!-- Leaflet JS -->
+        <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.3/dist/leaflet.js"></script>
+        <script>
+            // --- Variables globales ---
+            let map;
+            let clickedPoints = []; // mémorise tous les points cliqués
+            let markersAll = []; // marqueurs gris initiaux
+            let markersGreen = []; // marqueurs verts
+            let markersRed = []; // marqueurs rouges
+            let mlMarkers = []; // marqueurs d'analyse ML
+            let polylines = []; // lignes tracées
+            let currentLocationMarker = null;
+            let trackingEnabled = true;
+            let lastPosition = null;
+            let zonesVisible = false;
+            let anomaliesVisible = false;
+            let hasReceivedRealTimeLocation = false;
+
+            // Initialisation de la carte
+            function initMap() {
+                // Coordonnées de Reims
+                const reimsCoordinates = [49.2484420, 4.0415017];
+
+                // Créer la carte
+                map = L.map('map').setView(reimsCoordinates, 14);
+
+                // Ajouter la couche de tuiles
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '© OpenStreetMap',
+                    maxZoom: 19
+                }).addTo(map);
+
+                // Configurer les événements
+                map.on('click', onMapClick);
+
+                // Charger les points existants
+                loadAllPoints();
+
+                // Forcer le centrage sur Reims au démarrage
+                setTimeout(() => {
+                    map.setView(reimsCoordinates, 14);
+                }, 500);
+            }
+
+            // Configuration des onglets
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.addEventListener('click', function() {
+                    // Trouver le conteneur parent de cet onglet
+                    const parent = this.closest('.info-panel');
+
+                    // Désactiver tous les onglets dans ce panneau
+                    parent.querySelectorAll('.tab').forEach(t => {
+                        t.classList.remove('active');
+                    });
+
+                    // Masquer tous les contenus dans ce panneau
+                    parent.querySelectorAll('.tab-content').forEach(content => {
+                        content.style.display = 'none';
+                    });
+
+                    // Activer l'onglet cliqué
+                    this.classList.add('active');
+
+                    // Afficher le contenu correspondant
+                    const tabName = this.getAttribute('data-tab');
+                    const tabContent = document.getElementById(`${tabName}-tab`);
+                    if (tabContent) {
+                        tabContent.style.display = 'block';
+
+                        // Charger les données au besoin
+                        if (tabName === 'ml-zones' && document.getElementById('zones-list').innerHTML === 'Chargement des zones...') {
+                            loadPopularZones();
+                        } else if (tabName === 'ml-anomalies' && document.getElementById('anomalies-list').innerHTML.includes('Chargement des anomalies')) {
+                            loadSpeedAnomalies();
+                        } else if (tabName === 'ml-stats') {
+                            // Initialiser les graphiques lorsque l'onglet statistiques est sélectionné
+                            updateAllCharts();
+                        }
+                    }
+                });
+            });
+
+            // Configuration des boutons
+            document.addEventListener('DOMContentLoaded', function() {
+                // Bouton pour basculer le suivi
+                document.getElementById('toggle-tracking').addEventListener('click', function() {
+                    trackingEnabled = !trackingEnabled;
+                    this.textContent = trackingEnabled ? 'Désactiver suivi' : 'Activer suivi';
+
+                    // Si on active le suivi et qu'on a déjà reçu une position, recentrer la carte
+                    if (trackingEnabled && hasReceivedRealTimeLocation && currentLocationMarker) {
+                        map.setView(currentLocationMarker.getLatLng(), 16);
+                    }
+                });
+
+                // Bouton pour effacer les segments
+                document.getElementById('clear-segments').addEventListener('click', function() {
+                    clearSegments();
+                });
+
+                // Bouton pour entraîner le modèle
+                document.getElementById('train-model-btn').addEventListener('click', function() {
+                    trainModel();
+                });
+
+                // Bouton pour afficher/masquer les zones
+                document.getElementById('show-zones-btn').addEventListener('click', function() {
+                    if (!zonesVisible) {
+                        showZonesOnMap();
+                        this.textContent = "Masquer sur carte";
+                        zonesVisible = true;
+                    } else {
+                        clearMLMarkers();
+                        this.textContent = "Afficher sur carte";
+                        zonesVisible = false;
+                    }
+                });
+
+                // Bouton pour actualiser les anomalies
+                document.getElementById('get-anomalies-btn').addEventListener('click', function() {
+                    loadSpeedAnomalies();
+                });
+
+                // Bouton pour afficher/masquer les anomalies
+                document.getElementById('show-anomalies-btn').addEventListener('click', function() {
+                    if (!anomaliesVisible) {
+                        showAnomaliesOnMap();
+                        this.textContent = "Masquer sur carte";
+                        anomaliesVisible = true;
+                    } else {
+                        clearMLMarkers();
+                        this.textContent = "Afficher sur carte";
+                        anomaliesVisible = false;
+                    }
+                });
+
+                // Initialiser la carte
+                initMap();
+
+                // Configurer les actualisations périodiques
+                setInterval(fetchLatestPoint, 5000);
+                setInterval(loadAllPoints, 30000);
+                setInterval(fetchLatestExplanation, 10000);
+
+                // Appel initial
+                fetchLatestExplanation();
+            });
+
+            // Chargement des points historiques
+            function loadAllPoints() {
+                fetch("/get_all_points")
+                    .then(res => res.json())
+                    .then(data => {
+                        let points = data.points;
+                        console.log("Points chargés:", points.length, points);
+
+                        // Mise à jour du nombre de points
+                        document.getElementById('point-count').textContent = `Points historiques: ${points.length}`;
+
+                        // Effacer les anciens marqueurs
+                        markersAll.forEach(m => map.removeLayer(m));
+                        markersAll = [];
+
+                        // Si aucun point n'est trouvé, afficher un message explicatif
+                        if (points.length === 0) {
+                            document.getElementById('point-count').textContent = "Aucun point historique trouvé";
+                            return;
+                        }
+
+                        // Ajouter les nouveaux marqueurs
+                        points.forEach(pt => {
+                            let lat = pt.latitude;
+                            let lon = pt.longitude;
+                            let m = L.circleMarker([lat, lon], {
+                                radius: 4,
+                                color: 'gray',
+                                fillColor: 'gray',
+                                fillOpacity: 1
+                            }).addTo(map);
+                            markersAll.push(m);
+                        });
+
+                        // Montrer le dernier point s'il existe
+                        if (points.length > 0) {
+                            const lastPoint = points[points.length - 1];
+                            updateLatestPointDisplay(lastPoint);
+
+                            // Définir les limites de la carte pour montrer tous les points
+                            if (!hasReceivedRealTimeLocation) {
+                                const latitudes = points.map(pt => pt.latitude);
+                                const longitudes = points.map(pt => pt.longitude);
+
+                                // Trouver les coordonnées min/max
+                                const minLat = Math.min(...latitudes);
+                                const maxLat = Math.max(...latitudes);
+                                const minLng = Math.min(...longitudes);
+                                const maxLng = Math.max(...longitudes);
+
+                                // Ajouter une marge pour une meilleure visualisation
+                                const padding = 0.001; // environ 100m en latitude/longitude
+
+                                if (maxLat - minLat > 0 && maxLng - minLng > 0) {
+                                    // Utiliser fitBounds pour centrer la carte sur tous les points
+                                    map.fitBounds([
+                                        [minLat - padding, minLng - padding],
+                                        [maxLat + padding, maxLng + padding]
+                                    ]);
+                                }
+                            }
+                        }
+                    })
+                    .catch(err => {
+                        console.error("Erreur de chargement des points:", err);
+                        document.getElementById('point-count').textContent = "Erreur de chargement des points";
+                    });
+            }
+
+            // Mettre à jour l'affichage du dernier point
+            function updateLatestPointDisplay(point) {
+                const position = [point.latitude, point.longitude];
+                lastPosition = position;
+
+                // Mettre à jour ou créer le marqueur de position actuelle
+                if (currentLocationMarker) {
+                    currentLocationMarker.setLatLng(position);
+                } else {
+                    currentLocationMarker = L.circleMarker(position, {
+                        radius: 8,
+                        color: '#4285F4',
+                        fillColor: '#4285F4',
+                        fillOpacity: 0.8,
+                        weight: 2
+                    }).addTo(map);
+                }
+
+                // Vérifier si c'est un point en temps réel
+                if (point.is_latest === true) {
+                    hasReceivedRealTimeLocation = true;
+
+                    // Si le suivi est activé, centrer la carte sur la position actuelle
+                    if (trackingEnabled) {
+                        map.setView(position, 16); // Zoom plus précis (16) pour la position en temps réel
+                    }
+                }
+
+                // Mettre à jour le panneau d'informations
+                document.getElementById('latest-location').innerHTML =
+                    `Position actuelle: ${point.latitude.toFixed(6)}, ${point.longitude.toFixed(6)}`;
+                document.getElementById('speed-info').innerHTML =
+                    `Vitesse: ${point.speed.toFixed(2)} m/s`;
+            }
+
+            // Récupérer le dernier point avec l'analyse ML
+            function fetchLatestPoint() {
+                fetch('/get_latest_point')
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.status === 'success' && data.latest_point) {
+                            const point = data.latest_point;
+                            point.is_latest = true;
+
+                            // Mettre à jour l'affichage du point
+                            updateLatestPointDisplay(point);
+
+                            // Mettre à jour l'analyse ML
+                            if (data.ml_analysis) {
+                                updateMLStatus(data.ml_analysis);
+                            }
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Erreur lors de la récupération du dernier point:', error);
+                    });
+            }
+
+            // Mettre à jour le statut ML
+            function updateMLStatus(mlData) {
+                const mlStatus = document.getElementById('ml-status');
+
+                if (!mlData || mlData.status === 'no_model') {
+                    mlStatus.innerHTML = `
+                    <div class="anomaly-warning">⚠️ Modèles ML non entraînés</div>
+                    <div>Cliquez sur "Entraîner modèle"</div>
+                `;
+                    return;
+                }
+
+                let html = "";
+
+                // Analyse de vitesse
+                if (mlData.speed_analysis) {
+                    const analysis = mlData.speed_analysis;
+                    if (analysis.is_anomaly) {
+                        html += `<div class="anomaly-danger">⚠️ ${analysis.message}</div>`;
+                        html += `<div>Score: ${analysis.anomaly_score.toFixed(3)}</div>`;
+                    } else {
+                        html += `<div class="anomaly-normal">✓ ${analysis.message}</div>`;
+                    }
+                }
+
+                // Information de zone
+                if (mlData.current_zone) {
+                    const zone = mlData.current_zone;
+                    if (zone.in_popular_zone) {
+                        html += `<div style="color: blue; margin-top: 5px;">
+                        📍 Zone populaire #${zone.zone_rank}
+                        <br>(${zone.point_count} points)</div>`;
+                    } else {
+                        html += `<div style="color: gray; margin-top: 5px;">
+                        Zone peu fréquentée</div>`;
+                    }
+                }
+
+                mlStatus.innerHTML = html || `<div class="anomaly-normal">Aucune anomalie détectée</div>`;
+            }
+
+            // Charger les zones populaires
+            function loadPopularZones() {
+                fetch('/ml/popular_zones')
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.status === 'success') {
+                            const zones = data.zones;
+                            const zonesList = document.getElementById('zones-list');
+
+                            if (zones.length === 0) {
+                                zonesList.innerHTML = "Aucune zone fréquentée détectée";
+                                return;
+                            }
+
+                            let html = "";
+
+                            // Afficher chaque zone
+                            zones.forEach((zone, index) => {
+                                const rank = index + 1;
+                                let color;
+
+                                if (rank === 1) color = '#FF4500'; // Rouge-orangé
+                                else if (rank <= 3) color = '#FFA500'; // Orange
+                                else color = '#32CD32'; // Vert
+
+                                // Ajouter au HTML
+                                html += `
+                                <div class="zone-item">
+                                    <span class="zone-indicator" style="background-color: ${color};"></span>
+                                    <b>Zone #${rank}</b> (${zone.point_count} points)
+                                    <br>
+                                    <button onclick="centerMapOn(${zone.center[0]}, ${zone.center[1]})" class="button" style="margin-top: 3px; padding: 3px 6px;">
+                                        Voir
+                                    </button>
+                                </div>
+                            `;
+                            });
+
+                            zonesList.innerHTML = html;
+                        } else {
+                            document.getElementById('zones-list').innerHTML =
+                                `Erreur: ${data.message || 'Impossible de récupérer les zones'}`;
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Erreur:', error);
+                        document.getElementById('zones-list').innerHTML =
+                            "Erreur lors de la récupération des zones";
+                    });
+            }
+
+            // Afficher les zones sur la carte
+            function showZonesOnMap() {
+                // Nettoyer les marqueurs existants
+                clearMLMarkers();
+
+                fetch('/ml/popular_zones')
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.status === 'success') {
+                            const zones = data.zones;
+
+                            // Afficher chaque zone sur la carte
+                            zones.forEach((zone, index) => {
+                                const rank = index + 1;
+                                let color;
+
+                                if (rank === 1) color = '#FF4500'; // Rouge-orangé
+                                else if (rank <= 3) color = '#FFA500'; // Orange
+                                else color = '#32CD32'; // Vert
+
+                                // Ajouter un marqueur
+                                const marker = L.circleMarker(zone.center, {
+                                    radius: 15 - (rank * 2),
+                                    color: color,
+                                    fillColor: color,
+                                    fillOpacity: 0.6,
+                                    weight: 2
+                                }).addTo(map);
+
+                                marker.bindPopup(`<b>Zone populaire #${rank}</b><br>${zone.point_count} points dans cette zone`);
+                                mlMarkers.push(marker);
+
+                                // Ajouter un cercle pour montrer l'étendue
+                                const circle = L.circle(zone.center, {
+                                    radius: 50, // 50 mètres
+                                    color: color,
+                                    fillColor: color,
+                                    fillOpacity: 0.2,
+                                    weight: 1
+                                }).addTo(map);
+
+                                mlMarkers.push(circle);
+                            });
+                        } else {
+                            alert(`Erreur: ${data.message || 'Impossible de récupérer les zones'}`);
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Erreur:', error);
+                        alert("Erreur lors de la récupération des zones");
+                    });
+            }
+
+            // Charger les anomalies de vitesse
+            // Charger les anomalies de vitesse avec un affichage tabulaire
+            function loadSpeedAnomalies() {
+                document.getElementById('anomalies-list').innerHTML = '<tr><td colspan="4" style="padding: 10px; text-align: center;">Chargement des anomalies...</td></tr>';
+
+                fetch('/ml/speed_anomalies')
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.status === 'success') {
+                            const anomalies = data.anomalies;
+                            const anomaliesList = document.getElementById('anomalies-list');
+
+                            if (anomalies.length === 0) {
+                                anomaliesList.innerHTML = '<tr><td colspan="4" style="padding: 10px; text-align: center;">Aucune anomalie détectée</td></tr>';
+                                return;
+                            }
+
+                            let html = "";
+
+                            // Afficher chaque anomalie en format tableau
+                            anomalies.forEach((anomaly, index) => {
+                                // Déterminer la classe de couleur en fonction du score d'anomalie
+                                let scoreClass = "anomaly-normal";
+                                if (anomaly.anomaly_score < -0.5) {
+                                    scoreClass = "anomaly-danger";
+                                } else if (anomaly.anomaly_score < -0.3) {
+                                    scoreClass = "anomaly-warning";
+                                }
+
+                                // Formater le type d'anomalie
+                                let typeText = "Vitesse anormale";
+                                if (anomaly.speed > 10) {
+                                    typeText = "Vitesse élevée";
+                                } else if (anomaly.speed < 0.2) {
+                                    typeText = "Arrêt soudain";
+                                }
+
+                                html += `
+                        <tr style="border-bottom: 1px solid #eee;">
+                            <td style="padding: 8px;">${typeText}</td>
+                            <td style="padding: 8px; text-align: center;" class="${scoreClass}">${anomaly.anomaly_score.toFixed(3)}</td>
+                            <td style="padding: 8px; text-align: center;">${anomaly.speed.toFixed(2)} m/s</td>
+                            <td style="padding: 8px; text-align: center;">
+                                <button onclick="centerMapOn(${anomaly.latitude}, ${anomaly.longitude})" class="button" style="padding: 3px 6px; margin: 0;">
+                                    Voir
+                                </button>
+                            </td>
+                        </tr>
+                    `;
+                            });
+
+                            anomaliesList.innerHTML = html;
+                        } else {
+                            document.getElementById('anomalies-list').innerHTML =
+                                `<tr><td colspan="4" style="padding: 10px; text-align: center;">Erreur: ${data.message || 'Impossible de récupérer les anomalies'}</td></tr>`;
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Erreur:', error);
+                        document.getElementById('anomalies-list').innerHTML =
+                            '<tr><td colspan="4" style="padding: 10px; text-align: center;">Erreur lors de la récupération des anomalies</td></tr>';
+                    });
+            }
+
+            // Afficher les anomalies sur la carte
+            function showAnomaliesOnMap() {
+                // Nettoyer les marqueurs existants
+                clearMLMarkers();
+
+                fetch('/ml/speed_anomalies')
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.status === 'success') {
+                            const anomalies = data.anomalies;
+
+                            // Afficher chaque anomalie sur la carte
+                            anomalies.forEach((anomaly, index) => {
+                                // Ajouter un marqueur
+                                const marker = L.circleMarker([anomaly.latitude, anomaly.longitude], {
+                                    radius: 8,
+                                    color: '#d32f2f',
+                                    fillColor: '#d32f2f',
+                                    fillOpacity: 0.7,
+                                    weight: 2
+                                }).addTo(map);
+
+                                marker.bindPopup(`
+                                <b>Anomalie de vitesse</b><br>
+                                Vitesse: ${anomaly.speed.toFixed(2)} m/s<br>
+                                Score: ${anomaly.anomaly_score.toFixed(3)}
+                            `);
+
+                                mlMarkers.push(marker);
+                            });
+                        } else {
+                            alert(`Erreur: ${data.message || 'Impossible de récupérer les anomalies'}`);
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Erreur:', error);
+                        alert("Erreur lors de la récupération des anomalies");
+                    });
+            }
+
+            // Fonction pour nettoyer les marqueurs ML
+            function clearMLMarkers() {
+                mlMarkers.forEach(marker => {
+                    map.removeLayer(marker);
+                });
+                mlMarkers = [];
+            }
+
+            // Fonction pour centrer la carte sur un point
+            function centerMapOn(lat, lon) {
+                map.setView([lat, lon], 16);
+            }
+
+            // Fonction pour entraîner le modèle
+            function trainModel() {
+                const btn = document.getElementById('train-model-btn');
+                btn.disabled = true;
+                btn.textContent = "Entraînement...";
+
+                fetch('/ml/train', {
+                        method: 'POST'
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.status === 'success') {
+                            alert('Modèle entraîné avec succès !');
+
+                            // Rafraîchir les données
+                            fetchLatestPoint();
+                            if (document.getElementById('ml-zones-tab').style.display !== 'none') {
+                                loadPopularZones();
+                            }
+                            if (document.getElementById('ml-anomalies-tab').style.display !== 'none') {
+                                loadSpeedAnomalies();
+                            }
+                        } else {
+                            alert(`Erreur: ${data.message || 'Échec de l\'entraînement'}`);
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Erreur:', error);
+                        alert('Erreur de connexion');
+                    })
+                    .finally(() => {
+                        btn.disabled = false;
+                        btn.textContent = "Entraîner modèle";
+                    });
+            }
+            // Variables pour les graphiques
+            let speedChart = null;
+            let zonesPieChart = null;
+            let activityBarChart = null;
+            let speedHistogram = null;
+            let heatmapTimeline = null;
+
+            // Fonction principale pour mettre à jour tous les graphiques
+            function updateAllCharts(timeRange = 'all') {
+                // Récupération des données avec période optionnelle
+                let url = '/get_all_points';
+                if (timeRange !== 'all') {
+                    url += `?timeRange=${timeRange}`;
+                }
+
+                fetch(url)
+                    .then(res => res.json())
+                    .then(data => {
+                        const points = data.points;
+
+                        if (points.length === 0) {
+                            return;
+                        }
+
+                        // Mettre à jour les KPIs
+                        updateKPIs(points);
+
+                        // Mettre à jour tous les graphiques
+                        updateSpeedChart(points);
+                        updateSpeedHistogram(points);
+
+                        // Récupérer les zones populaires
+                        fetch('/ml/popular_zones')
+                            .then(response => response.json())
+                            .then(zoneData => {
+                                if (zoneData.status === 'success') {
+                                    updateZonesPieChart(zoneData.zones);
+                                }
+                            });
+
+                        // Récupérer les anomalies
+                        fetch('/ml/speed_anomalies')
+                            .then(response => response.json())
+                            .then(anomalyData => {
+                                if (anomalyData.status === 'success') {
+                                    updateHeatmapTimeline(points, anomalyData.anomalies);
+                                    document.getElementById('anomaly-count').textContent = anomalyData.anomalies.length;
+                                }
+                            });
+
+                        // Analyser les activités (simulées ici)
+                        updateActivityBarChart(points);
+                    });
+            }
+
+            // Mettre à jour les indicateurs clés (KPIs)
+            function updateKPIs(points) {
+                // Total des points
+                document.getElementById('total-points').textContent = points.length;
+
+                // Vitesse moyenne
+                const avgSpeed = points.reduce((sum, p) => sum + p.speed, 0) / points.length;
+                document.getElementById('avg-speed').textContent = avgSpeed.toFixed(2);
+            }
+
+            // Mettre à jour le graphique de vitesse
+            function updateSpeedChart(points) {
+                const ctx = document.getElementById('speedChart').getContext('2d');
+
+                // Extraire les 50 derniers points maximum pour la lisibilité
+                const recentPoints = points.slice(-50);
+                const speeds = recentPoints.map(p => p.speed);
+                const pointLabels = Array.from({
+                    length: speeds.length
+                }, (_, i) => i + 1);
+
+                if (speedChart) {
+                    speedChart.destroy();
+                }
+
+                speedChart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: pointLabels,
+                        datasets: [{
+                            label: 'Vitesse (m/s)',
+                            data: speeds,
+                            borderColor: '#4285F4',
+                            backgroundColor: 'rgba(66, 133, 244, 0.1)',
+                            borderWidth: 2,
+                            tension: 0.2,
+                            fill: true
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            title: {
+                                display: true,
+                                text: 'Évolution de la vitesse'
+                            },
+                            tooltip: {
+                                mode: 'index',
+                                intersect: false
+                            }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                title: {
+                                    display: true,
+                                    text: 'Vitesse (m/s)'
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+
+            // Mettre à jour le graphique circulaire des zones
+            function updateZonesPieChart(zones) {
+                const ctx = document.getElementById('zonesPieChart').getContext('2d');
+
+                if (zonesPieChart) {
+                    zonesPieChart.destroy();
+                }
+
+                const colors = ['#FF4500', '#FFA500', '#32CD32', '#1E90FF', '#9370DB'];
+                const labels = zones.map((z, i) => `Zone #${i+1} (${z.point_count} pts)`);
+                const data = zones.map(z => z.point_count);
+
+                zonesPieChart = new Chart(ctx, {
+                    type: 'doughnut',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'Points par zone',
+                            data: data,
+                            backgroundColor: colors.slice(0, zones.length),
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            title: {
+                                display: true,
+                                text: 'Répartition par zone'
+                            },
+                            legend: {
+                                position: 'right',
+                                labels: {
+                                    boxWidth: 12
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+
+            // Créer un graphique en barres pour les activités
+            function updateActivityBarChart(points) {
+                const ctx = document.getElementById('activityBarChart').getContext('2d');
+
+                // Simulation de données d'activité - dans un cas réel, vous extrairiez cela de vos points
+                const activities = {
+                    'Stationary': 0,
+                    'Walking': 0,
+                    'Running': 0,
+                    'Driving': 0,
+                    'Cycling': 0
+                };
+
+                // Compter les occurrences de chaque activité (simulation)
+                points.forEach((_, index) => {
+                    if (index % 5 === 0) activities['Stationary']++;
+                    else if (index % 7 === 0) activities['Running']++;
+                    else if (index % 3 === 0) activities['Walking']++;
+                    else if (index % 11 === 0) activities['Cycling']++;
+                    else activities['Driving']++;
+                });
+
+                if (activityBarChart) {
+                    activityBarChart.destroy();
+                }
+
+                activityBarChart = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: Object.keys(activities),
+                        datasets: [{
+                            label: 'Nombre de points',
+                            data: Object.values(activities),
+                            backgroundColor: [
+                                'rgba(54, 162, 235, 0.6)',
+                                'rgba(75, 192, 192, 0.6)',
+                                'rgba(255, 99, 132, 0.6)',
+                                'rgba(255, 159, 64, 0.6)',
+                                'rgba(153, 102, 255, 0.6)'
+                            ],
+                            borderColor: [
+                                'rgba(54, 162, 235, 1)',
+                                'rgba(75, 192, 192, 1)',
+                                'rgba(255, 99, 132, 1)',
+                                'rgba(255, 159, 64, 1)',
+                                'rgba(153, 102, 255, 1)'
+                            ],
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            title: {
+                                display: true,
+                                text: 'Distribution des activités'
+                            },
+                            legend: {
+                                display: false
+                            }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true
+                            }
+                        }
+                    }
+                });
+            }
+
+            // Créer un histogramme des vitesses
+            function updateSpeedHistogram(points) {
+                const ctx = document.getElementById('speedHistogram').getContext('2d');
+
+                // Créer des catégories pour l'histogramme
+                const speedCategories = {
+                    '0-1 m/s': 0,
+                    '1-2 m/s': 0,
+                    '2-5 m/s': 0,
+                    '5-10 m/s': 0,
+                    '10+ m/s': 0
+                };
+
+                // Compter les points dans chaque catégorie
+                points.forEach(p => {
+                    if (p.speed < 1) speedCategories['0-1 m/s']++;
+                    else if (p.speed < 2) speedCategories['1-2 m/s']++;
+                    else if (p.speed < 5) speedCategories['2-5 m/s']++;
+                    else if (p.speed < 10) speedCategories['5-10 m/s']++;
+                    else speedCategories['10+ m/s']++;
+                });
+
+                if (speedHistogram) {
+                    speedHistogram.destroy();
+                }
+
+                speedHistogram = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: Object.keys(speedCategories),
+                        datasets: [{
+                            label: 'Nombre de points',
+                            data: Object.values(speedCategories),
+                            backgroundColor: 'rgba(75, 192, 192, 0.6)',
+                            borderColor: 'rgba(75, 192, 192, 1)',
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            title: {
+                                display: true,
+                                text: 'Distribution des vitesses'
+                            },
+                            legend: {
+                                display: false
+                            }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                title: {
+                                    display: true,
+                                    text: 'Nombre de points'
+                                }
+                            },
+                            x: {
+                                title: {
+                                    display: true,
+                                    text: 'Catégories de vitesse'
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+
+            // Créer une timeline avec les anomalies
+            function updateHeatmapTimeline(points, anomalies) {
+                const ctx = document.getElementById('heatmapTimeline').getContext('2d');
+
+                // Créer un ensemble de timestamps pour les anomalies
+                const anomalyIds = new Set(anomalies.map(a => a.id));
+
+                // Créer les données pour le graphique
+                const normalPoints = [];
+                const anomalyPoints = [];
+
+                // Utiliser les 100 derniers points maximum pour la lisibilité
+                const recentPoints = points.slice(-100);
+
+                recentPoints.forEach((point, index) => {
+                    if (anomalyIds.has(point.id)) {
+                        normalPoints.push(null);
+                        anomalyPoints.push(point.speed);
+                    } else {
+                        normalPoints.push(point.speed);
+                        anomalyPoints.push(null);
+                    }
+                });
+
+                const labels = Array.from({
+                    length: recentPoints.length
+                }, (_, i) => i + 1);
+
+                if (heatmapTimeline) {
+                    heatmapTimeline.destroy();
+                }
+
+                heatmapTimeline = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'Vitesse normale',
+                            data: normalPoints,
+                            borderColor: 'rgba(75, 192, 192, 1)',
+                            backgroundColor: 'rgba(75, 192, 192, 0.1)',
+                            pointBackgroundColor: 'rgba(75, 192, 192, 1)',
+                            borderWidth: 2,
+                            tension: 0.1,
+                            fill: false
+                        }, {
+                            label: 'Anomalies',
+                            data: anomalyPoints,
+                            borderColor: 'rgba(255, 99, 132, 1)',
+                            backgroundColor: 'rgba(255, 99, 132, 0.5)',
+                            pointBackgroundColor: 'rgba(255, 99, 132, 1)',
+                            pointRadius: 6,
+                            pointHoverRadius: 8,
+                            borderWidth: 2,
+                            tension: 0
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            title: {
+                                display: true,
+                                text: 'Chronologie avec anomalies'
+                            },
+                            tooltip: {
+                                mode: 'index',
+                                intersect: false
+                            }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                title: {
+                                    display: true,
+                                    text: 'Vitesse (m/s)'
+                                }
+                            },
+                            x: {
+                                title: {
+                                    display: true,
+                                    text: 'Points séquentiels'
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+
+            // Événement pour le sélecteur de période
+            document.getElementById('stats-time-range').addEventListener('change', function() {
+                updateAllCharts(this.value);
+            });
+
+            // Événement pour le bouton d'actualisation
+            document.getElementById('refresh-stats-btn').addEventListener('click', function() {
+                const timeRange = document.getElementById('stats-time-range').value;
+                updateAllCharts(timeRange);
+            });
+            // Fonction pour récupérer la dernière explication OpenAI
+            function fetchLatestExplanation() {
+                fetch('/get_latest_analysis')
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.explanation && data.explanation !== "Pas d'analyse disponible.") {
+                            document.getElementById('openai-text').textContent = data.explanation;
+                            document.getElementById('openai-explanation').style.display = 'block';
+                        } else {
+                            document.getElementById('openai-explanation').style.display = 'none';
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Erreur lors de la récupération de l\'explication:', error);
+                    });
+            }
+
+            // Fonction pour effacer les segments
+            function clearSegments() {
+                // Supprimer les marqueurs de segments
+                clickedPoints.forEach((_, i) => {
+                    const labelChar = String.fromCharCode(65 + i);
+                    const markers = map._layers;
+                    for (let id in markers) {
+                        if (markers[id]._popup && markers[id]._popup._content === labelChar) {
+                            map.removeLayer(markers[id]);
+                        }
+                    }
+                });
+
+                // Supprimer les polylines
+                polylines.forEach(p => map.removeLayer(p));
+
+                // Réinitialiser les variables
+                clickedPoints = [];
+                polylines = [];
+
+                // Réinitialiser l'affichage
+                document.getElementById('segments-info').innerHTML =
+                    "Cliquez sur la carte pour placer des points A, B, C...<br>Les segments seront analysés automatiquement.";
+
+                // Recharger tous les points
+                loadAllPoints();
+            }
+
+            // Fonction exécutée lors d'un clic sur la carte
+            function onMapClick(e) {
+                // On ajoute ce point dans clickedPoints
+                clickedPoints.push([e.latlng.lat, e.latlng.lng]);
+
+                // Calcule la lettre associée (A,B,C,...) 
+                let labelIndex = clickedPoints.length - 1; // 0 pour premier clic
+                let labelChar = String.fromCharCode(65 + labelIndex); // 'A' + labelIndex
+
+                // Placer un marker avec ce label
+                let marker = L.marker([e.latlng.lat, e.latlng.lng]).addTo(map);
+                marker.bindPopup(labelChar).openPopup();
+
+                // Mettre à jour l'information sur les segments
+                document.getElementById('segments-info').innerHTML =
+                    `${clickedPoints.length} points placés (${Array.from({length: clickedPoints.length}, (_, i) => String.fromCharCode(65 + i)).join(', ')})`;
+
+                // Si on a un nombre pair de points, on peut former un segment
+                if (clickedPoints.length % 2 === 0) {
+                    let n = clickedPoints.length;
+                    let A = clickedPoints[n - 2]; // avant-dernier
+                    let B = clickedPoints[n - 1]; // dernier
+
+                    // 1) Dessiner la ligne (A->B) en bleu
+                    let poly = L.polyline([A, B], {
+                        color: 'blue'
+                    }).addTo(map);
+                    polylines.push(poly);
+
+                    // 2) Premier fetch => /compute pour CE segment
+                    fetch("/compute", {
+                            method: "POST",
+                            headers: {
+                                "Content-Type": "application/json"
+                            },
+                            body: JSON.stringify({
+                                latA: A[0],
+                                lonA: A[1],
+                                latB: B[0],
+                                lonB: B[1]
+                            })
+                        })
+                        .then(res => res.json())
+                        .then(data => {
+                            let onStreet = data.onStreet;
+                            let offStreet = data.offStreet;
+                            let avgSpeed = data.avgSpeed; // <-- vitesse moyenne sur CE segment
+                            console.log("onStreet:", onStreet.length, "offStreet:", offStreet.length, "avgSpeed:", avgSpeed);
+
+                            // Supprime TOUTES les couches existantes (gris, vert, rouge)
+                            markersAll.forEach(m => map.removeLayer(m));
+                            markersGreen.forEach(m => map.removeLayer(m));
+                            markersRed.forEach(m => map.removeLayer(m));
+                            markersAll = [];
+                            markersGreen = [];
+                            markersRed = [];
+
+                            // Points verts
+                            onStreet.forEach(pt => {
+                                let [lat, lon] = pt;
+                                let m = L.circleMarker([lat, lon], {
+                                    radius: 4,
+                                    color: 'green',
+                                    fillColor: 'green',
+                                    fillOpacity: 1
+                                }).addTo(map);
+                                markersGreen.push(m);
+                            });
+
+                            // Points rouges
+                            offStreet.forEach(pt => {
+                                let [lat, lon] = pt;
+                                let m = L.circleMarker([lat, lon], {
+                                    radius: 4,
+                                    color: 'red',
+                                    fillColor: 'red',
+                                    fillOpacity: 1
+                                }).addTo(map);
+                                markersRed.push(m);
+                            });
+
+                            // Affiche le résultat pour CE segment
+                            document.getElementById('segments-info').innerHTML +=
+                                `<br><b>Segment #${clickedPoints.length / 2}:</b>
+                          <br>Points sur la rue: ${onStreet.length}
+                          <br>Hors rue: ${offStreet.length}
+                          <br>Vitesse moyenne: ${avgSpeed.toFixed(2)} m/s`;
+                        })
+                        .catch(err => console.error(err))
+                        .then(() => {
+                            // === 3) DEUXIEME FETCH => on veut la somme entre le TOUT PREMIER point (clickedPoints[0]) et le DERNIER point B ===
+                            if (clickedPoints.length >= 2) {
+                                let first = clickedPoints[0]; // tout premier point
+                                let B = clickedPoints[clickedPoints.length - 1]; // dernier point
+
+                                fetch("/compute", {
+                                        method: "POST",
+                                        headers: {
+                                            "Content-Type": "application/json"
+                                        },
+                                        body: JSON.stringify({
+                                            latA: first[0],
+                                            lonA: first[1],
+                                            latB: B[0],
+                                            lonB: B[1]
+                                        })
+                                    })
+                                    .then(r => r.json())
+                                    .then(data2 => {
+                                        let sumOn = data2.onStreet.length;
+                                        let sumOff = data2.offStreet.length;
+                                        let sumSpeed = data2.avgSpeed; // <-- vitesse moyenne global (A->Z)
+
+                                        document.getElementById('segments-info').innerHTML +=
+                                            `<br><br><b>Total (A→${String.fromCharCode(64 + clickedPoints.length)}):</b>
+                                      <br>Points sur la rue: ${sumOn}
+                                      <br>Hors rue: ${sumOff}
+                                      <br>Vitesse moyenne: ${sumSpeed.toFixed(2)} m/s`;
+                                    })
+                                    .catch(err => console.error("Erreur sum:", err));
+                            }
+                        });
+                }
+            }
+        </script>
+</body>
+
+</html>
